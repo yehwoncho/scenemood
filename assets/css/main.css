@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * 디자인 토큰 (DESIGN.md §1)
+ * Tailwind와 GSAP이 공유하는 단일 소스. 색상 · 이징 · 지속시간 · 레이아웃 값은
+ * 전부 여기서만 정의하고, tailwind.config.ts와 JS(GSAP) 양쪽에서 참조한다.
+ */
+:root {
+  /* Color */
+  --bg: #0a0a0a;
+  --surface: #141414;
+  --surface-hi: #1e1e1e;
+  --text: #ffffff;
+  --text-dim: #8a8a8a;
+  --text-mute: #4a4a4a;
+  --accent: #c6ff00;
+  --line: rgba(255, 255, 255, 0.08);
+
+  /* Motion — GSAP 타임라인/quickTo에서 그대로 참조할 값.
+     transform·opacity 트랜지션은 Tailwind가 아닌 GSAP이 이 값을 읽어 직접 제어한다. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* power3.out 근사 */
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 0.4s;
+  --dur-base: 0.8s;
+  --dur-slow: 1.2s;
+
+  /* Layout */
+  --max-w: 1440px;
+  --gutter: 24px;
+  --radius: 4px; /* 시네마틱 무드 — 라운드 최소화 */
+
+  /* Depth (클러스터 레이어 패럴랙스 계수) — JS에서 data-depth 속성으로 참조,
+     Tailwind 유틸리티로는 노출하지 않는다 */
+  --z-back: 0.3;
+  --z-mid: 0.6;
+  --z-front: 1;
+
+  /* Typography — 웹폰트 로딩(자체 호스팅/서브셋)은 이후 단계 작업.
+     지금은 시스템 폰트로 폴백한다. */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-kr: 'Pretendard', -apple-system, 'Malgun Gothic', sans-serif;
+}
+
+html {
+  background-color: var(--bg);
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-kr), var(--font-sans);
+}
