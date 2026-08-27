@@ -17,22 +17,23 @@ export interface HeroPosterRef {
   mediaType: HeroMediaType
 }
 
-// 임시 채움 — 최신·대표 인기작 위주로 구도가 깔끔한 것들. 눈으로 보고 교체 가능.
+// TMDB /trending/all/week (2026-08-27 기준) popularity 상위에서 poster_path 있는
+// movie 11 + tv 5. 최신 유행작이라 시간이 지나면 교체 필요 — 위 "교체 방법" 참고.
 export const HERO_POSTERS: HeroPosterRef[] = [
-  { id: 693134, mediaType: 'movie' }, // Dune: Part Two
-  { id: 872585, mediaType: 'movie' }, // Oppenheimer
-  { id: 414906, mediaType: 'movie' }, // The Batman
-  { id: 545611, mediaType: 'movie' }, // Everything Everywhere All at Once
-  { id: 792307, mediaType: 'movie' }, // Poor Things
-  { id: 569094, mediaType: 'movie' }, // Spider-Man: Across the Spider-Verse
-  { id: 940721, mediaType: 'movie' }, // Godzilla Minus One
-  { id: 496243, mediaType: 'movie' }, // Parasite
-  { id: 335984, mediaType: 'movie' }, // Blade Runner 2049
-  { id: 313369, mediaType: 'movie' }, // La La Land
-  { id: 157336, mediaType: 'movie' }, // Interstellar
-  { id: 100088, mediaType: 'tv' }, //    The Last of Us
-  { id: 126308, mediaType: 'tv' }, //    Shōgun
-  { id: 136315, mediaType: 'tv' }, //    The Bear
-  { id: 95396, mediaType: 'tv' }, //     Severance
-  { id: 93405, mediaType: 'tv' }, //     Squid Game
+  { id: 969681, mediaType: 'movie' }, //  스파이더맨: 브랜드 뉴 데이
+  { id: 1368337, mediaType: 'movie' }, // 오디세이 (The Odyssey)
+  { id: 1288445, mediaType: 'movie' }, // 뮤티니 (Mutiny)
+  { id: 1621552, mediaType: 'movie' }, // 엘 차포를 체포하라 (La captura)
+  { id: 1084244, mediaType: 'movie' }, // 토이 스토리 5
+  { id: 1339713, mediaType: 'movie' }, // 옵세션 (Obsession)
+  { id: 1315772, mediaType: 'movie' }, // 미니언즈 & 몬스터즈
+  { id: 1083381, mediaType: 'movie' }, // 백룸 (Backrooms)
+  { id: 1212763, mediaType: 'movie' }, // 이블 데드 번 (Evil Dead Burn)
+  { id: 1101383, mediaType: 'movie' }, // 오크 스트리트의 마지막 날
+  { id: 1291595, mediaType: 'movie' }, // 인시디어스: 그들이 넘어왔다
+  { id: 108978, mediaType: 'tv' }, //    리처 (Reacher)
+  { id: 113962, mediaType: 'tv' }, //    라이어니스: 특수 작전팀 (Lioness)
+  { id: 100757, mediaType: 'tv' }, //    아우터뱅크스 (Outer Banks)
+  { id: 95350, mediaType: 'tv' }, //     랜턴스 (Lanterns)
+  { id: 125988, mediaType: 'tv' }, //    사일로 (Silo)
 ]

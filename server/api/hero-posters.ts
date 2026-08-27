@@ -56,4 +56,10 @@ export default defineCachedEventHandler(async (event: H3Event): Promise<HeroPost
   }
 
   return posters
-}, { maxAge: 60 * 60, name: 'hero-posters', getKey: () => 'all' })
+}, {
+  maxAge: 60 * 60,
+  name: 'hero-posters',
+  // 캐시 키에 목록 시그니처를 넣어, data/heroPosters.ts 를 편집하면 즉시 새로 조회되게 한다
+  // (안 그러면 목록을 바꿔도 maxAge 동안 옛 응답이 나온다).
+  getKey: () => `v${HERO_POSTERS.length}-${HERO_POSTERS.reduce((sum, p) => sum + p.id, 0)}`,
+})
