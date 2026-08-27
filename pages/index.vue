@@ -13,9 +13,9 @@
  *   quickTo로 매 mousemove마다 gsap.to()를 새로 만들지 않는다 (프레임 붕괴 방지).
  *   .cluster 호버 중에는 회전을 pause — 정지 커서 밑에서 회전하는 엘리먼트의
  *   :hover 를 브라우저가 갱신하지 않아 색이 박제되는 문제를 막는다.
- * - 랜덤 위치/회전은 마운트 시 1회만 정하는 "정적 배치"이므로 top/left/rotate를
- *   인라인 스타일로 한 번만 찍는다 (계속 애니메이션하는 속성이 아니라 §5의
- *   "top/left 금지" 규칙과 충돌하지 않음).
+ * - 포스터 위치(left/top px)는 마운트 시 1회 계산 + resize 시에만 재계산하는
+ *   "정적 배치"다. 매 프레임 바뀌는 속성이 아니라 §5의 "top/left 애니메이션 금지"
+ *   규칙과 충돌하지 않는다. arrangement(각도·반경계수)는 고정, px 만 뷰포트에 맞춰 스케일.
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import gsap from 'gsap'
@@ -27,8 +27,9 @@ interface PosterItem {
   title: string
   posterUrl: string
   layer: LayerName
-  top: number // %
-  left: number // %
+  arrangement: Arrangement // resize 시 px 재계산용 (각도·반경계수는 고정)
+  x: number // px, 뷰포트 좌상단 기준 포스터 중심
+  y: number // px
   rotation: number // deg
   scale: number // depth 별 미세 크기차 (0.85~1.0)
   blur: number // px, depth 별 흐림
@@ -52,66 +53,100 @@ const LAYER_STYLE: Record<LayerName, { scale: number, blur: number, brightness: 
 }
 const BASE_Z: Record<LayerName, number> = { back: 10, mid: 20, front: 30 }
 
-// 타원 궤도 배치 — 뒷레이어일수록 반경을 살짝 키워 원근감을 준다
-const LAYER_RADIUS_MUL: Record<LayerName, number> = { back: 1.14, mid: 1.0, front: 0.88 }
+// ── 타원 클러스터 배치 ───────────────────────────────────────────────
+// 반경·중심·최소거리를 전부 뷰포트 px 로 계산한다 (%가 아니라).
+// left:% 는 가로에 vw, top:% 는 세로에 vh 를 곱하므로, 이 둘을 섞어 거리 판정을
+// 하면 16:10 처럼 비율이 바뀔 때 좌우 밀도가 쏠린다. window.innerWidth/Height 를
+// 런타임에 읽고, resize 시 arrangement(각도·반경계수)는 그대로 둔 채 px 만 다시 계산한다.
+const RADIUS_FRAC = { x: 0.42, y: 0.32 } // 각 축 기준 기본 반경 비율 (가로가 넓은 납작한 타원)
+const LAYER_RADIUS_MUL: Record<LayerName, number> = { back: 1.06, mid: 1.0, front: 0.92 }
+const RING_MIN = 0.55 // 반경에 0.55~1.0 계수 → 링에 두께를 줘 tangential 뭉침 완화
+const MIN_DIST_FRAC = 0.16 // 포스터 간 최소 중심거리 = min(vw, vh) * 이 값
+const MAX_PLACE_TRIES = 24
+const EDGE_MARGIN = 64 // 화면 밖으로 나가지 않도록 좌표를 가두는 최소 여백(px)
+const SAFE_PAD = { x: 40, y: 44 } // 중앙 카피(제목·태그라인·CTA) 안전 영역 여유(px)
 
-// 포아송 디스크 근사 — 배치 시 뭉침/공백 완화.
-// MIN_DIST 8%로는 포스터 폭(~10%)에 못 미쳐 시각적으로 붙어 보였다 → 15%로 상향.
-const MIN_DIST = 15 // 뷰포트 % — 이미 배치된 포스터 중심과 최소 이만큼 떨어뜨린다
-const MAX_PLACE_TRIES = 20
+interface Arrangement {
+  angle: number
+  ring: number
+}
+type PxPoint = { x: number, y: number }
+type SafeBox = { l: number, r: number, t: number, b: number }
 
 function rand(min: number, max: number) {
   return Math.random() * (max - min) + min
 }
+const clampNum = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
 function layerOf(index: number): LayerName {
   return index < 5 ? 'back' : index < 11 ? 'mid' : 'front'
 }
 
-// 타원 궤도 위의 후보 좌표 1개.
-// 기존 로직 그대로: 인덱스 기반 기준 각도 + 지터(±0.15rad) + 랜덤 반경(ringFactor 0.72~1.0).
-function candidatePosition(index: number, total: number, layer: LayerName) {
-  const angle = (index / total) * Math.PI * 2 + rand(-0.15, 0.15)
-  // 가로(42~48%) / 세로(32~38%) 타원 — 가로가 더 넓은 납작한 형태.
-  // 세로 반경은 중앙 카피(BLINK + 태그라인 + START CTA)를 피하도록 넉넉히.
-  const ringFactor = rand(0.72, 1.0)
-  const radiusMul = LAYER_RADIUS_MUL[layer] * ringFactor
+// 인덱스로 원주(2π)에 고르게 나눈 기준 각도 + 지터, 반경 계수는 랜덤.
+function randomArrangement(index: number, total: number): Arrangement {
   return {
-    left: 50 + Math.cos(angle) * rand(42, 48) * radiusMul,
-    top: 50 + Math.sin(angle) * rand(32, 38) * radiusMul,
+    angle: (index / total) * Math.PI * 2 + rand(-0.22, 0.22),
+    ring: rand(RING_MIN, 1.0),
   }
 }
 
-type Point = { top: number, left: number }
+// arrangement → 현재 뷰포트 기준 실제 px 좌표. 화면 밖으로는 안 나가게 clamp.
+function resolvePos(a: Arrangement, layer: LayerName, vw: number, vh: number): PxPoint {
+  const mul = LAYER_RADIUS_MUL[layer] * a.ring
+  return {
+    x: clampNum(vw / 2 + Math.cos(a.angle) * vw * RADIUS_FRAC.x * mul, EDGE_MARGIN, vw - EDGE_MARGIN),
+    y: clampNum(vh / 2 + Math.sin(a.angle) * vh * RADIUS_FRAC.y * mul, EDGE_MARGIN, vh - EDGE_MARGIN),
+  }
+}
 
-function minGap(cand: Point, placed: Point[]) {
+const inBox = (p: PxPoint, b: SafeBox) => p.x > b.l && p.x < b.r && p.y > b.t && p.y < b.b
+
+function minGapPx(cand: PxPoint, placed: PxPoint[]) {
   let m = Infinity
   for (const p of placed) {
-    const d = Math.hypot(p.left - cand.left, p.top - cand.top)
+    const d = Math.hypot(p.x - cand.x, p.y - cand.y)
     if (d < m) m = d
   }
   return m
 }
 
-// 각 포스터마다 후보를 최대 20회 뽑아, MIN_DIST 를 만족하는 첫 후보를 채택한다.
-// 20회 내내 실패하면 그중 "가장 멀리 떨어진" 후보로 타협 (완벽하진 않아도 뭉침 완화).
-function placePositions(count: number): Point[] {
-  const placed: Point[] = []
+// 포아송 디스크 근사: 후보를 최대 24회 뽑아, 중앙 카피 안전 영역을 피하면서
+// 최소거리(min(vw,vh) * MIN_DIST_FRAC)를 만족하는 첫 후보를 채택.
+// 24회 내내 실패하면 그중 가장 멀리 떨어진 후보로 타협한다.
+function placeArrangements(count: number, vw: number, vh: number, safe: SafeBox | null): Arrangement[] {
+  const minDist = Math.min(vw, vh) * MIN_DIST_FRAC
+  const chosen: Arrangement[] = []
+  const chosenPos: PxPoint[] = []
   for (let i = 0; i < count; i++) {
     const layer = layerOf(i)
-    let best = candidatePosition(i, count, layer)
-    let bestGap = placed.length ? minGap(best, placed) : Infinity
-    for (let t = 1; t < MAX_PLACE_TRIES && bestGap < MIN_DIST; t++) {
-      const cand = candidatePosition(i, count, layer)
-      const gap = minGap(cand, placed)
+    let best: Arrangement | null = null
+    let bestPos: PxPoint | null = null
+    let bestGap = -1
+    for (let t = 0; t < MAX_PLACE_TRIES; t++) {
+      const a = randomArrangement(i, count)
+      const pos = resolvePos(a, layer, vw, vh)
+      if (safe && inBox(pos, safe)) continue // 중앙 카피 안전 영역이면 후보 폐기
+      const gap = chosenPos.length ? minGapPx(pos, chosenPos) : Infinity
+      if (gap >= minDist) {
+        best = a
+        bestPos = pos
+        break
+      }
       if (gap > bestGap) {
-        best = cand
+        best = a
+        bestPos = pos
         bestGap = gap
       }
     }
-    placed.push(best)
+    if (!best || !bestPos) {
+      // 24회 모두 안전 영역에 걸린 극단적 경우 — 링 최대 반경으로 바깥쪽에 둔다
+      best = { angle: randomArrangement(i, count).angle, ring: 1.0 }
+      bestPos = resolvePos(best, layer, vw, vh)
+    }
+    chosen.push(best)
+    chosenPos.push(bestPos)
   }
-  return placed
+  return chosen
 }
 
 const posters = ref<PosterItem[]>([])
@@ -120,6 +155,24 @@ const loadFailed = ref(false)
 
 const router = useRouter()
 const isLeaving = ref(false) // /pick 이동 전환 중 — 중복 클릭 잠금
+
+// 중앙 카피 블록(제목·태그라인·CTA) — 배치 안전 영역 측정용
+const copyEl = ref<HTMLElement | null>(null)
+
+function copySafeBox(vw: number, vh: number): SafeBox {
+  const r = copyEl.value?.getBoundingClientRect()
+  if (!r) {
+    // 폴백: 화면 중앙 세로 스트립
+    const halfW = Math.min(vw * 0.32, 360)
+    return { l: vw / 2 - halfW, r: vw / 2 + halfW, t: vh / 2 - 150, b: vh / 2 + 170 }
+  }
+  return {
+    l: r.left - SAFE_PAD.x,
+    r: r.right + SAFE_PAD.x,
+    t: r.top - SAFE_PAD.y,
+    b: r.bottom + SAFE_PAD.y,
+  }
+}
 
 const backPosters = computed(() => posters.value.filter((p) => p.layer === 'back'))
 const midPosters = computed(() => posters.value.filter((p) => p.layer === 'mid'))
@@ -137,7 +190,10 @@ async function loadPosters() {
     )
     const candidates = res.slice(0, 16)
     const total = candidates.length
-    const positions = placePositions(total) // 포아송 디스크 근사로 겹침/공백 완화
+
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const arrangements = placeArrangements(total, vw, vh, copySafeBox(vw, vh))
 
     // 현재 화면에 뜬 고정 목록 확인용 (개발 모드 전용)
     if (import.meta.dev) {
@@ -147,13 +203,15 @@ async function loadPosters() {
     posters.value = candidates.map((m, i) => {
       const layer = layerOf(i)
       const s = LAYER_STYLE[layer]
+      const pos = resolvePos(arrangements[i], layer, vw, vh)
       return {
         uid: `${m.mediaType}-${m.id}`,
         title: m.title,
         posterUrl: `https://image.tmdb.org/t/p/w342${m.poster_path}`,
         layer,
-        top: positions[i].top,
-        left: positions[i].left,
+        arrangement: arrangements[i],
+        x: pos.x,
+        y: pos.y,
         rotation: rand(-4, 4),
         scale: s.scale,
         blur: s.blur,
@@ -172,8 +230,8 @@ async function loadPosters() {
 
 function posterStyle(p: PosterItem) {
   return {
-    top: `${p.top}%`,
-    left: `${p.left}%`,
+    left: `${p.x}px`, // 뷰포트 px — resize 시 relayout() 가 갱신
+    top: `${p.y}px`,
     width: `${BASE_WIDTH}px`, // 전 포스터 공통. depth 차이는 아래 scale 로만.
     // top/left는 타원 궤도 위의 "중심점"이므로 -50%/-50%로 앵커를 중앙에 맞춘다.
     // rotate(calc(var(--wrapper-rot) * -1deg)) — 부모 .orbit 의 회전(--wrapper-rot,
@@ -190,6 +248,22 @@ function posterStyle(p: PosterItem) {
 
 // 호버 색상·확대·z-index 는 전부 순수 CSS(:hover)로 처리한다. JS 상태/이벤트 핸들러 없음
 // — 회전 중 mouseleave 유실로 상태가 박제되던 버그 제거.
+
+// resize: arrangement(각도·반경계수)는 고정한 채 새 뷰포트로 px 만 다시 계산.
+// → 클러스터 "모양"은 유지되고 화면 비율에 맞게 스케일만 바뀐다 (재랜덤 없음).
+let resizeRaf = 0
+function relayout() {
+  cancelAnimationFrame(resizeRaf)
+  resizeRaf = requestAnimationFrame(() => {
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    for (const p of posters.value) {
+      const pos = resolvePos(p.arrangement, p.layer, vw, vh)
+      p.x = pos.x
+      p.y = pos.y
+    }
+  })
+}
 
 // --- 마우스 패럴랙스 (레이어 단위 quickTo) ---
 const clusterEl = ref<HTMLElement | null>(null)
@@ -319,10 +393,13 @@ onMounted(() => {
   setupParallax() // 레이어 DOM은 항상 렌더되므로 포스터 로드를 기다릴 필요 없음
   setupOrbit()
   loadPosters()
+  window.addEventListener('resize', relayout)
 })
 
 onUnmounted(() => {
   if (onMouseMove) window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('resize', relayout)
+  cancelAnimationFrame(resizeRaf)
   if (onClusterEnter) clusterEl.value?.removeEventListener('mouseenter', onClusterEnter)
   if (onClusterLeave) clusterEl.value?.removeEventListener('mouseleave', onClusterLeave)
   floatTweens.forEach((t) => t.kill())
@@ -339,27 +416,31 @@ onUnmounted(() => {
   <section class="relative h-screen w-full overflow-hidden bg-bg">
     <!-- 헤드라인 -->
     <div
-      class="hero-copy pointer-events-none absolute inset-0 z-40 flex flex-col items-center justify-center px-gutter text-center"
+      class="hero-copy pointer-events-none absolute inset-0 z-40 flex items-center justify-center px-gutter"
     >
-      <h1 class="text-display text-text">BLINK</h1>
-      <p class="mt-4 max-w-site text-body text-text-dim">
-        "뭐 보지?"를 30초 만에 끝내는 무드 기반 콘텐츠 큐레이터
-      </p>
+      <!-- copyEl: 실제 카피 블록. 배치 안전 영역을 이 요소의 bounding box 로 잰다. -->
+      <div ref="copyEl" class="flex flex-col items-center text-center">
+        <h1 class="text-display text-text">BLINK</h1>
+        <p class="mt-4 max-w-site text-body text-text-dim">
+          "뭐 보지?"를 30초 만에 끝내는 무드 기반 콘텐츠 큐레이터
+        </p>
 
-      <!-- CTA — 배경 없이 테두리만. 호버 시 border·텍스트만 --accent 로 (무드 유지) -->
-      <button
-        type="button"
-        class="pointer-events-auto mt-6 inline-flex items-center border border-line px-10 py-4 text-caption uppercase tracking-[0.25em] text-text transition-colors duration-fast ease-out hover:border-accent hover:text-accent disabled:opacity-40"
-        :disabled="isLeaving"
-        @click="goToPick"
-      >
-        Start
-      </button>
+        <!-- CTA — 배경 없이 테두리만. 호버/포커스 시 border·텍스트만 --accent 로 (무드 유지).
+             focus:outline-none 으로 UA 포커스 사각 테두리 제거, focus-visible 로 대체 -->
+        <button
+          type="button"
+          class="pointer-events-auto mt-7 inline-flex items-center border border-line px-8 py-3.5 text-caption uppercase tracking-[0.25em] text-text transition-colors duration-fast ease-out hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent focus:outline-none disabled:opacity-40"
+          :disabled="isLeaving"
+          @click="goToPick"
+        >
+          Start
+        </button>
 
-      <p v-if="isLoading" class="mt-8 text-caption text-text-mute">포스터를 불러오는 중…</p>
-      <p v-else-if="loadFailed" class="mt-8 text-caption text-text-mute">
-        포스터를 불러오지 못했습니다. .env의 TMDB_API_KEY를 확인해주세요.
-      </p>
+        <p v-if="isLoading" class="mt-8 text-caption text-text-mute">포스터를 불러오는 중…</p>
+        <p v-else-if="loadFailed" class="mt-8 text-caption text-text-mute">
+          포스터를 불러오지 못했습니다. .env의 TMDB_API_KEY를 확인해주세요.
+        </p>
+      </div>
     </div>
 
     <!-- 포스터 클러스터 -->
