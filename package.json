@@ -10,7 +10,9 @@
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
-    "gsap": "^3.12.5"
+    "@pinia/nuxt": "^1.0.2",
+    "gsap": "^3.12.5",
+    "pinia": "^4.0.3"
   },
   "devDependencies": {
     "@nuxtjs/tailwindcss": "^6.12.0",
