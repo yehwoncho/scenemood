@@ -1,0 +1,5 @@
+# BLINK — 모든 크롤러 허용 (AI 크롤러 GPTBot·ClaudeBot·PerplexityBot 등 포함, 차단하지 않음)
+User-agent: *
+Allow: /
+
+Sitemap: https://scenemood-277.vercel.app/sitemap.xml

@@ -27,6 +27,11 @@ const route = useRoute()
 const router = useRouter()
 const pick = usePickStore()
 
+useSeoMeta({
+  title: '지금 기분에 맞는 걸 골라드려요 - BLINK',
+  ogTitle: '지금 기분에 맞는 걸 골라드려요 - BLINK',
+})
+
 const TOTAL_STEPS = 3
 
 // ?step= → 1..3 로 정규화. 범위 밖/누락이면 1.

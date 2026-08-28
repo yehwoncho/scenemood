@@ -40,6 +40,26 @@ const SITUATION_LABEL: Record<Situation, string> = {
   together: '함께',
 }
 
+/* ── SEO 메타 — 선택한 상황/기분을 반영해 description 동적 생성 ── */
+const SITUATION_PHRASE: Record<Situation, string> = {
+  alone: '혼밥할 때',
+  bedtime: '자기 전에',
+  together: '함께 볼 때',
+}
+const seoDescription = computed(() => {
+  const phrase = pick.situation ? SITUATION_PHRASE[pick.situation] : null
+  const mood = pick.moods.length ? MOOD_LABEL[pick.moods[0]] : null
+  if (phrase && mood) return `${phrase} 보기 좋은, ${mood} 영화 3편을 골랐어요`
+  if (phrase) return `${phrase} 보기 좋은 영화 3편을 골랐어요`
+  return '지금 상황과 기분에 맞는 영화 3편'
+})
+useSeoMeta({
+  title: '당신을 위한 추천 - BLINK',
+  ogTitle: '당신을 위한 추천 - BLINK',
+  description: () => seoDescription.value,
+  ogDescription: () => seoDescription.value,
+})
+
 // #잔잔하게 #90분 이하 #자기 전  (PRD §6.4)
 // 조건이 좁아 서버가 기분을 완화했으면 실제 반영된 것만 칩으로 노출한다
 // (선택한 태그를 무시하고 고른 카드에 그 태그를 붙이면 6.4의 "투명성"과 어긋난다).
