@@ -443,7 +443,7 @@ onUnmounted(() => {
 
         <p v-if="isLoading" class="mt-8 text-caption text-text-mute">포스터를 불러오는 중…</p>
         <p v-else-if="loadFailed" class="mt-8 text-caption text-text-mute">
-          포스터를 불러오지 못했습니다. .env의 TMDB_API_KEY를 확인해주세요.
+          포스터를 불러오지 못했어요 — 시작하는 데는 문제 없어요
         </p>
       </div>
     </div>

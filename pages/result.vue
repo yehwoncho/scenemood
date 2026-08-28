@@ -135,12 +135,33 @@ async function reRoll() {
   isRolling.value = false
 }
 
+// 느린 네트워크 대비 — 로딩이 5초 넘게 이어지면 안내 문구를 덧붙인다.
+const SLOW_LOADING_MS = 5000
+const slowLoading = ref(false)
+let slowTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearSlowTimer() {
+  if (slowTimer) {
+    clearTimeout(slowTimer)
+    slowTimer = null
+  }
+}
+
 async function retry() {
   await load()
 }
 
 async function load() {
+  slowLoading.value = false
+  clearSlowTimer()
+  slowTimer = setTimeout(() => {
+    if (result.status === 'loading') slowLoading.value = true
+  }, SLOW_LOADING_MS)
+
   await Promise.all([sleep(LOADING_MIN_MS), result.loadPool()])
+
+  clearSlowTimer()
+  slowLoading.value = false
   if (result.status === 'ready') {
     await nextTick()
     gatherIn()
@@ -161,6 +182,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  clearSlowTimer()
   gsap.killTweensOf('.js-result-card')
 })
 </script>
@@ -174,18 +196,32 @@ onUnmounted(() => {
       <!-- 로딩 연출 (PRD §5) -->
       <div v-if="result.status === 'loading' || result.status === 'idle'" class="py-32 text-center">
         <p class="result-loading text-h2 text-text-dim">당신을 위한 3편을 고르는 중</p>
+        <p v-if="slowLoading" class="mt-4 text-caption text-text-mute">
+          네트워크가 느린 것 같아요 — 조금만 더 기다려주세요
+        </p>
       </div>
 
-      <!-- 에러 -->
+      <!-- 에러 (TMDB 요청 실패 등) -->
       <div v-else-if="result.status === 'error'" class="py-32 text-center">
-        <p class="text-h2 text-text-dim">{{ result.errorMessage }}</p>
-        <button
-          type="button"
-          class="mt-8 inline-flex items-center border border-line px-8 py-3.5 text-caption uppercase tracking-[0.25em] text-text transition-colors duration-fast ease-out hover:border-accent hover:text-accent"
-          @click="retry"
-        >
-          다시 시도
-        </button>
+        <p class="text-h2 text-text">문제가 생겼어요</p>
+        <p class="mt-3 text-caption text-text-mute">
+          {{ result.errorMessage || '잠시 후 다시 시도해주세요' }}
+        </p>
+        <div class="mt-8 flex items-center justify-center gap-6">
+          <button
+            type="button"
+            class="inline-flex items-center border border-line px-8 py-3.5 text-caption uppercase tracking-[0.25em] text-text transition-colors duration-fast ease-out hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent focus:outline-none"
+            @click="retry"
+          >
+            다시 시도
+          </button>
+          <NuxtLink
+            to="/pick"
+            class="text-caption uppercase tracking-[0.1em] text-text-mute transition-colors duration-fast ease-out hover:text-text-dim"
+          >
+            다시 고르기
+          </NuxtLink>
+        </div>
       </div>
 
       <!-- 결과 3편 -->

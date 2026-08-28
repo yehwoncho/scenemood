@@ -62,6 +62,9 @@ export const useResultStore = defineStore('result', () => {
         runtime: pick.runtime,
         page,
       },
+      // 느린/끊긴 네트워크에서 무한 로딩 대신 25초 후 에러로 떨어지게 한다.
+      timeout: 25_000,
+      retry: 0,
     })
   }
 
@@ -86,8 +89,9 @@ export const useResultStore = defineStore('result', () => {
     }
     catch (err: any) {
       status.value = 'error'
+      // 서버가 준 사유가 있으면 그대로, 없으면(네트워크 끊김·타임아웃) 일반 안내.
       errorMessage.value
-        = err?.data?.statusMessage || err?.statusMessage || '추천을 불러오지 못했어요.'
+        = err?.data?.statusMessage || err?.statusMessage || '네트워크 상태를 확인해주세요'
     }
   }
 

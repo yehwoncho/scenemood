@@ -142,6 +142,7 @@ function scatterOut(done: () => void) {
 function goToStep(next: number) {
   if (isTransitioning.value) return
   if (next < 1 || next > TOTAL_STEPS) return
+  if (next === 3 && pick.moods.length === 0) return // 기분 없이 조건 설정으로 못 감
   isTransitioning.value = true // 전환 중 클릭 잠금 (중복 트리거 방지)
   scatterOut(() => {
     router.push({ query: { ...route.query, step: String(next) } })
@@ -149,8 +150,11 @@ function goToStep(next: number) {
   })
 }
 
+// 기분 0개면 STEP 3 진입·결과 보기를 막는다 (직접 URL·뒤로가기로 도달한 경우까지).
+const noMoods = computed(() => pick.moods.length === 0)
+
 function goToResult() {
-  if (isTransitioning.value) return
+  if (isTransitioning.value || noMoods.value) return
   isTransitioning.value = true
   scatterOut(() => {
     router.push('/result')
@@ -262,23 +266,28 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div class="js-step-el mt-12 flex items-center gap-6">
-          <button
-            type="button"
-            class="text-caption uppercase tracking-[0.1em] text-text-mute transition-colors duration-fast ease-out hover:text-text-dim"
-            :disabled="isTransitioning"
-            @click="goToStep(1)"
-          >
-            ← 상황 다시
-          </button>
-          <button
-            type="button"
-            class="inline-flex items-center border border-line px-8 py-3.5 text-caption uppercase tracking-[0.25em] text-text transition-colors duration-fast ease-out hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent focus:outline-none disabled:opacity-40"
-            :disabled="isTransitioning || pick.moods.length === 0"
-            @click="goToStep(3)"
-          >
-            다음
-          </button>
+        <div class="js-step-el mt-12">
+          <div class="flex items-center gap-6">
+            <button
+              type="button"
+              class="text-caption uppercase tracking-[0.1em] text-text-mute transition-colors duration-fast ease-out hover:text-text-dim"
+              :disabled="isTransitioning"
+              @click="goToStep(1)"
+            >
+              ← 상황 다시
+            </button>
+            <button
+              type="button"
+              class="inline-flex items-center border border-line px-8 py-3.5 text-caption uppercase tracking-[0.25em] text-text transition-colors duration-fast ease-out hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line disabled:hover:text-text"
+              :disabled="isTransitioning || noMoods"
+              @click="goToStep(3)"
+            >
+              다음
+            </button>
+          </div>
+          <p v-if="noMoods" class="mt-3 text-caption text-text-mute">
+            기분을 1개 이상 선택해주세요
+          </p>
         </div>
       </section>
 
@@ -315,23 +324,28 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="js-step-el mt-14 flex items-center gap-6">
-          <button
-            type="button"
-            class="text-caption uppercase tracking-[0.1em] text-text-mute transition-colors duration-fast ease-out hover:text-text-dim"
-            :disabled="isTransitioning"
-            @click="goToStep(2)"
-          >
-            ← 기분 다시
-          </button>
-          <button
-            type="button"
-            class="inline-flex items-center border border-line px-8 py-3.5 text-caption uppercase tracking-[0.25em] text-text transition-colors duration-fast ease-out hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent focus:outline-none disabled:opacity-40"
-            :disabled="isTransitioning"
-            @click="goToResult"
-          >
-            결과 보기
-          </button>
+        <div class="js-step-el mt-14">
+          <div class="flex items-center gap-6">
+            <button
+              type="button"
+              class="text-caption uppercase tracking-[0.1em] text-text-mute transition-colors duration-fast ease-out hover:text-text-dim"
+              :disabled="isTransitioning"
+              @click="goToStep(2)"
+            >
+              ← 기분 다시
+            </button>
+            <button
+              type="button"
+              class="inline-flex items-center border border-line px-8 py-3.5 text-caption uppercase tracking-[0.25em] text-text transition-colors duration-fast ease-out hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line disabled:hover:text-text"
+              :disabled="isTransitioning || noMoods"
+              @click="goToResult"
+            >
+              결과 보기
+            </button>
+          </div>
+          <p v-if="noMoods" class="mt-3 text-caption text-text-mute">
+            기분을 1개 이상 선택해주세요 — 왼쪽 “기분 다시”에서 고를 수 있어요
+          </p>
         </div>
       </section>
     </div>
