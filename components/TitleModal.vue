@@ -2,11 +2,31 @@
 import type { ReviewInsightResponse } from '~/server/api/review-insight'
 
 /**
- * 리뷰 기반 AI 코멘트 캐시 — 모듈 스코프라 컴포넌트가 다시 마운트돼도(모달 재오픈)
- * 유지된다. 같은 tmdb_id 는 재호출하지 않고, 진행 중 요청도 Promise 로 캐싱해
- * 중복 호출을 막는다. 실패한 요청만 지워 다음 오픈에서 재시도할 수 있게 둔다.
+ * 리뷰 기반 AI 코멘트 — tmdb_id 별 결과를 모듈 스코프에 캐싱한다.
+ * - 컴포넌트가 다시 마운트돼도(모달 재오픈) 유지 → 성공분은 재호출 없이 즉시.
+ * - 진행 중 요청도 같은 Promise 를 공유해 중복 호출을 막는다.
+ * - Promise 는 절대 reject 하지 않는다: 성공이면 문장, 실패/빈 응답이면 null.
+ * - 실패분은 캐시에 남기지 않는다(settle 후 삭제) → 쿼터가 회복되면 재오픈 시
+ *   다시 시도한다. 깜빡임은 캐시가 아니라 아래 로딩-지연 게이트로 막는다.
  */
-const insightCache = new Map<number, Promise<ReviewInsightResponse>>()
+interface InsightOutcome { comment: string | null }
+const insightCache = new Map<number, Promise<InsightOutcome>>()
+
+function fetchInsight(id: number, situation: string, moods: string): Promise<InsightOutcome> {
+  const cached = insightCache.get(id)
+  if (cached) return cached
+
+  const p = $fetch<ReviewInsightResponse>('/api/review-insight', {
+    params: { id, mediaType: 'movie', situation, moods },
+  })
+    .then((res): InsightOutcome => ({ comment: res.comment || null }))
+    .catch((): InsightOutcome => {
+      insightCache.delete(id) // 실패는 기억하지 않는다 — 다음 오픈에서 재시도
+      return { comment: null }
+    })
+  insightCache.set(id, p)
+  return p
+}
 </script>
 
 <script setup lang="ts">
@@ -21,7 +41,7 @@ const insightCache = new Map<number, Promise<ReviewInsightResponse>>()
  * - Teleport to body — 결과 카드 그리드에 GSAP transform 이 얹혀 있어
  *   position: fixed 가 그 안에서 깨지는 걸 피한다.
  */
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import gsap from 'gsap'
 import { usePickStore } from '~/stores/pick'
 import type { PoolItem } from '~/stores/result'
@@ -37,9 +57,49 @@ const closeBtn = ref<HTMLElement | null>(null)
 const detail = ref<DetailResponse | null>(null)
 const detailError = ref(false)
 
-// AI 코멘트 상태 (캐시는 위 비-setup <script> 블록의 모듈 스코프 insightCache)
+/**
+ * AI 코멘트 상태 (캐시는 위 비-setup <script> 블록의 모듈 스코프 insightCache).
+ *
+ * - aiLoading 은 "요청이 2.5s 넘게 걸릴 때"만 켜진다. 429·타임아웃 같은 빠른
+ *   실패(대개 <1.5s)나 캐시 히트는 그 전에 끝나므로 로딩 UI 가 아예 뜨지 않는다
+ *   → "잠깐 떴다 사라지는" 깜빡임 제거. (정상 성공은 3~8s 걸려 로딩이 보인다.)
+ * - loadInsight 는 props.item.id 를 watch 로 추적한다. 응답이 도착했을 때
+ *   모달이 다른 작품으로 바뀌었으면(레이스) 그 응답은 버린다.
+ */
 const aiComment = ref<string | null>(null)
 const aiLoading = ref(false)
+const LOADING_DELAY_MS = 2500
+let loadingTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearLoadingTimer() {
+  if (loadingTimer) {
+    clearTimeout(loadingTimer)
+    loadingTimer = null
+  }
+}
+
+async function loadInsight(targetId: number) {
+  clearLoadingTimer()
+  aiLoading.value = false
+  aiComment.value = null
+
+  // 캐시에 이미 있으면(=즉시 resolve) 로딩 UI 를 걸지 않는다.
+  if (!insightCache.has(targetId)) {
+    loadingTimer = setTimeout(() => {
+      if (props.item.id === targetId && aiComment.value === null) aiLoading.value = true
+    }, LOADING_DELAY_MS)
+  }
+
+  const pick = usePickStore()
+  const { comment } = await fetchInsight(targetId, pick.situation ?? '', pick.moods.join(','))
+
+  clearLoadingTimer()
+  // 레이스 가드 — 그 사이 모달이 다른 작품으로 바뀌었으면 이 응답은 폐기.
+  if (props.item.id !== targetId) return
+
+  aiLoading.value = false
+  aiComment.value = comment
+}
 
 function prefersReducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -109,9 +169,6 @@ onMounted(async () => {
     )
   }
 
-  // AI 코멘트 — 상세 데이터와 병렬로 (실패해도 모달엔 영향 없음)
-  loadInsight()
-
   // 상세 데이터
   try {
     detail.value = await $fetch<DetailResponse>('/api/detail', { params: { id: props.item.id } })
@@ -122,37 +179,13 @@ onMounted(async () => {
   buildEyebrow()
 })
 
-async function loadInsight() {
-  aiLoading.value = true
-  try {
-    let req = insightCache.get(props.item.id)
-    if (!req) {
-      const pick = usePickStore()
-      req = $fetch<ReviewInsightResponse>('/api/review-insight', {
-        params: {
-          id: props.item.id,
-          mediaType: 'movie',
-          situation: pick.situation ?? '',
-          moods: pick.moods.join(','),
-        },
-      })
-      insightCache.set(props.item.id, req)
-    }
-    aiComment.value = (await req).comment
-  }
-  catch {
-    // Gemini/TMDB 실패 — 이 섹션만 조용히 숨긴다 (모달은 그대로)
-    insightCache.delete(props.item.id)
-    aiComment.value = null
-  }
-  finally {
-    aiLoading.value = false
-  }
-}
+// 열림 + (혹시 인스턴스가 재사용돼) 다른 작품으로 바뀌는 경우 모두 커버.
+watch(() => props.item.id, (id) => { loadInsight(id) }, { immediate: true })
 
 onUnmounted(() => {
   document.body.style.overflow = ''
   document.removeEventListener('keydown', onKeydown)
+  clearLoadingTimer()
   gsap.killTweensOf([backdrop.value, panel.value])
 })
 </script>

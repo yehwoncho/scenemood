@@ -11,6 +11,14 @@ const MAX_REVIEWS = 5
 const REVIEW_CHAR_CAP = 1200 // 리뷰 1건당 프롬프트에 넣을 최대 길이 (토큰 방어)
 
 /**
+ * 성공 응답 인메모리 캐시 (TTL 6h). 같은 작품+상황+기분 조합을 다시 물어봐도
+ * Gemini 를 재호출하지 않는다 — 무료 티어 분당 요청 한도(20 RPM)를 아끼는 게 핵심.
+ * 서버 프로세스 단위라 재시작하면 비워진다. 프로세스 간 공유가 필요하면 KV 로 승격.
+ */
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000
+const responseCache = new Map<string, { value: ReviewInsightResponse, expires: number }>()
+
+/**
  * 상세 모달용 "리뷰 기반 AI 추천 코멘트" (PRD §6.5 확장).
  *
  *   GET /api/review-insight?id=550&mediaType=movie&situation=alone&moods=calm,cry
@@ -137,6 +145,13 @@ export default defineEventHandler(async (event: H3Event): Promise<ReviewInsightR
     .map((s) => s.trim())
     .filter(Boolean)
 
+  // ── 0. 캐시 조회 ──────────────────────────────────────────────────────
+  const cacheKey = `${mediaType}:${id}:${situation}:${[...moods].sort().join(',')}`
+  const hit = responseCache.get(cacheKey)
+  if (hit && hit.expires > Date.now()) {
+    return hit.value
+  }
+
   // ── 1. TMDB — 작품 정보(ko-KR) + 리뷰(언어 무관, 대개 영어) ──────────────
   // 리뷰는 language 를 붙이면 한국어 리뷰만 걸러져 대부분 0건이 된다. 별도 호출로
   // 전체 언어 리뷰를 받는다 (프롬프트에서 "한국어로 답하라"고 강제하므로 무방).
@@ -223,5 +238,7 @@ export default defineEventHandler(async (event: H3Event): Promise<ReviewInsightR
     throw createError({ statusCode: 502, statusMessage: 'AI 코멘트가 비어 있습니다.' })
   }
 
-  return { comment: raw, source }
+  const result: ReviewInsightResponse = { comment: raw, source }
+  responseCache.set(cacheKey, { value: result, expires: Date.now() + CACHE_TTL_MS })
+  return result
 })
