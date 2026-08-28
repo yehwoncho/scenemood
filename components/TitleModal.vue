@@ -1,3 +1,14 @@
+<script lang="ts">
+import type { ReviewInsightResponse } from '~/server/api/review-insight'
+
+/**
+ * 리뷰 기반 AI 코멘트 캐시 — 모듈 스코프라 컴포넌트가 다시 마운트돼도(모달 재오픈)
+ * 유지된다. 같은 tmdb_id 는 재호출하지 않고, 진행 중 요청도 Promise 로 캐싱해
+ * 중복 호출을 막는다. 실패한 요청만 지워 다음 오픈에서 재시도할 수 있게 둔다.
+ */
+const insightCache = new Map<number, Promise<ReviewInsightResponse>>()
+</script>
+
 <script setup lang="ts">
 /**
  * 상세 모달 (PRD §6.5) — 별도 라우팅 없이 오버레이로 처리.
@@ -12,6 +23,7 @@
  */
 import { onMounted, onUnmounted, ref } from 'vue'
 import gsap from 'gsap'
+import { usePickStore } from '~/stores/pick'
 import type { PoolItem } from '~/stores/result'
 import type { DetailResponse, DetailProvider } from '~/server/api/detail'
 
@@ -24,6 +36,10 @@ const closeBtn = ref<HTMLElement | null>(null)
 
 const detail = ref<DetailResponse | null>(null)
 const detailError = ref(false)
+
+// AI 코멘트 상태 (캐시는 위 비-setup <script> 블록의 모듈 스코프 insightCache)
+const aiComment = ref<string | null>(null)
+const aiLoading = ref(false)
 
 function prefersReducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -93,6 +109,9 @@ onMounted(async () => {
     )
   }
 
+  // AI 코멘트 — 상세 데이터와 병렬로 (실패해도 모달엔 영향 없음)
+  loadInsight()
+
   // 상세 데이터
   try {
     detail.value = await $fetch<DetailResponse>('/api/detail', { params: { id: props.item.id } })
@@ -102,6 +121,34 @@ onMounted(async () => {
   }
   buildEyebrow()
 })
+
+async function loadInsight() {
+  aiLoading.value = true
+  try {
+    let req = insightCache.get(props.item.id)
+    if (!req) {
+      const pick = usePickStore()
+      req = $fetch<ReviewInsightResponse>('/api/review-insight', {
+        params: {
+          id: props.item.id,
+          mediaType: 'movie',
+          situation: pick.situation ?? '',
+          moods: pick.moods.join(','),
+        },
+      })
+      insightCache.set(props.item.id, req)
+    }
+    aiComment.value = (await req).comment
+  }
+  catch {
+    // Gemini/TMDB 실패 — 이 섹션만 조용히 숨긴다 (모달은 그대로)
+    insightCache.delete(props.item.id)
+    aiComment.value = null
+  }
+  finally {
+    aiLoading.value = false
+  }
+}
 
 onUnmounted(() => {
   document.body.style.overflow = ''
@@ -147,6 +194,13 @@ onUnmounted(() => {
           <p class="title-modal__overview">
             {{ detail?.overview || item.overview || '등록된 시놉시스가 없어요.' }}
           </p>
+
+          <!-- 리뷰 기반 AI 코멘트 — 실패 시 섹션 자체를 숨긴다 -->
+          <div v-if="aiLoading || aiComment" class="title-modal__ai">
+            <span class="title-modal__eyebrow">AI 코멘트</span>
+            <p v-if="aiLoading" class="title-modal__ai-loading">리뷰 분석 중…</p>
+            <p v-else class="title-modal__ai-text">{{ aiComment }}</p>
+          </div>
 
           <div class="title-modal__rating">
             <span class="title-modal__rating-value">
@@ -325,6 +379,42 @@ onUnmounted(() => {
   line-height: 1.7;
   color: var(--text-dim);
   word-break: keep-all;
+}
+
+.title-modal__ai {
+  margin-top: 1.5rem;
+  padding: 1rem 1.1rem;
+  background: var(--surface-hi);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.title-modal__ai-text {
+  margin-top: 0.55rem;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+  word-break: keep-all;
+}
+.title-modal__ai-loading {
+  margin-top: 0.55rem;
+  font-size: 13px;
+  color: var(--text-mute);
+  animation: title-modal-pulse 1.4s var(--ease-inout) infinite;
+}
+@keyframes title-modal-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .title-modal__ai-loading {
+    animation: none;
+    opacity: 0.7;
+  }
 }
 
 .title-modal__rating {

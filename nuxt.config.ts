@@ -19,5 +19,8 @@ export default defineNuxtConfig({
     //    (Nuxt 규칙: runtimeConfig.<key> ← NUXT_<KEY>). 빌드 없이도 반영되므로
     //    배포 환경변수는 이 이름으로 등록할 것. 아래 기본값은 빌드 시점 폴백.
     tmdbApiKey: process.env.TMDB_API_KEY || process.env.NUXT_TMDB_API_KEY || '',
+    // Gemini API 키 — 리뷰 기반 AI 코멘트(server/api/review-insight.ts) 전용.
+    // TMDB 키와 동일하게 서버에서만 읽고, 배포 시 NUXT_GEMINI_API_KEY 로 덮어쓴다.
+    geminiApiKey: process.env.GEMINI_API_KEY || process.env.NUXT_GEMINI_API_KEY || '',
   },
 })
