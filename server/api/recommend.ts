@@ -39,6 +39,10 @@ const MOOD_GENRES: Record<string, number[]> = {
 const REVENGE_KEYWORD_ID = 9748 // TMDB 키워드 'revenge' — 사이다(catharsis) 보강
 const CALM_MAX_RUNTIME = 120
 const CALM_MIN_RATING = 7.0
+// 기분을 다 완화해 상황 필터만 남았을 때도 품질 하한은 지킨다 — 낡은 성인/컬트물
+// (예: 자기 전 완화 시 Vixen! 류)이 인기×평점 가중으로 올라오는 걸 막는다.
+const BASELINE_MIN_RATING = 6.0
+const BASELINE_MIN_VOTES = 200
 
 // PRD §6.3 상황별 하드 필터
 interface SituationFilter {
@@ -130,8 +134,8 @@ export default defineEventHandler(async (event: H3Event): Promise<RecommendRespo
     if (sf?.runtimeCap) runtimeCap = Math.min(runtimeCap, sf.runtimeCap)
     if (moods.includes('calm')) runtimeCap = Math.min(runtimeCap, CALM_MAX_RUNTIME)
 
-    // 평점 하한 — 상황(함께) vs 잔잔함 중 높은 값
-    let minRating = 0
+    // 평점 하한 — 기본 품질 하한 vs 상황(함께) vs 잔잔함 중 가장 높은 값
+    let minRating = BASELINE_MIN_RATING
     if (sf?.minRating) minRating = Math.max(minRating, sf.minRating)
     if (moods.includes('calm')) minRating = Math.max(minRating, CALM_MIN_RATING)
 
@@ -141,7 +145,7 @@ export default defineEventHandler(async (event: H3Event): Promise<RecommendRespo
       region: 'KR',
       include_adult: 'false', // PRD §8 — 클라이언트가 무엇을 보내든 항상 고정
       sort_by: 'popularity.desc',
-      'vote_count.gte': '50', // 표본 없는 고평점·단편 노이즈 제거
+      'vote_count.gte': String(BASELINE_MIN_VOTES), // 표본 없는 고평점·단편·컬트물 제거
       // TMDB /discover 의 with_runtime 은 runtime 미상(0) 항목을 못 걸러 신뢰할 수 없다.
       // 힌트로만 넣고, 실제 상한은 상세에서 받은 runtime 으로 아래에서 다시 필터한다.
       'with_runtime.gte': '1',

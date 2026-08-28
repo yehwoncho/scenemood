@@ -43,14 +43,23 @@ const SITUATION_LABEL: Record<Situation, string> = {
 // #잔잔하게 #90분 이하 #자기 전  (PRD §6.4)
 // 조건이 좁아 서버가 기분을 완화했으면 실제 반영된 것만 칩으로 노출한다
 // (선택한 태그를 무시하고 고른 카드에 그 태그를 붙이면 6.4의 "투명성"과 어긋난다).
+const effectiveMoods = computed<Mood[]>(() =>
+  result.relaxed ? (result.moodsUsed as Mood[]) : pick.moods,
+)
 const chips = computed(() => {
-  const effectiveMoods = result.relaxed
-    ? (result.moodsUsed as Mood[])
-    : pick.moods
-  const out = effectiveMoods.map((m) => MOOD_LABEL[m]).filter(Boolean)
+  const out = effectiveMoods.value.map((m) => MOOD_LABEL[m]).filter(Boolean)
   out.push(`${pick.runtime}분 이하`)
   if (pick.situation) out.push(SITUATION_LABEL[pick.situation])
   return out
+})
+
+// 완화로 빠진 기분 라벨 — 안내 문구용. 완화가 없었으면 빈 배열.
+const droppedMoodLabels = computed(() => {
+  if (!result.relaxed) return []
+  return pick.moods
+    .filter((m) => !result.moodsUsed.includes(m))
+    .map((m) => MOOD_LABEL[m])
+    .filter(Boolean)
 })
 
 // MATCH XX% — vote_average(0~10) × 10, 임시 계산 (DESIGN §2.9)
@@ -181,6 +190,14 @@ onUnmounted(() => {
         <header class="mb-12 md:mb-16">
           <span class="pick-card__eyebrow">RESULT</span>
           <h1 class="mt-3 max-w-[24ch] text-h1 text-text">이 세 편이면 충분해요</h1>
+          <!-- 완화 안내 — moodsUsed 가 원래 선택과 다를 때만 (PRD §6.4 투명성) -->
+          <p
+            v-if="droppedMoodLabels.length"
+            class="result-relax-note mt-4 max-w-[52ch] text-[12px] leading-relaxed text-text-dim"
+          >
+            선택하신 조건에 맞는 작품을 찾다 보니
+            ‘{{ droppedMoodLabels.join('’, ‘') }}’는 이번 추천에 반영되지 않았어요.
+          </p>
         </header>
 
         <div class="grid gap-6 md:grid-cols-3 md:gap-8">
@@ -286,6 +303,11 @@ onUnmounted(() => {
 /* 전환 중 클릭 잠금 (DESIGN §2.5) */
 .result-root--locked {
   pointer-events: none;
+}
+
+/* 완화 안내 — 한글은 어절 단위로 줄바꿈 (단어 중간에서 끊기지 않게) */
+.result-relax-note {
+  word-break: keep-all;
 }
 
 /* 로딩 텍스트 — opacity 펄스. 순수 CSS 라 GSAP(카드 전용)과 충돌 없음. */
