@@ -15,7 +15,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import gsap from 'gsap'
 import { usePickStore, type Mood, type Situation } from '~/stores/pick'
-import { useResultStore } from '~/stores/result'
+import { useResultStore, type PoolItem } from '~/stores/result'
 
 const router = useRouter()
 const pick = usePickStore()
@@ -69,6 +69,9 @@ function matchPct(voteAverage: number) {
 function posterUrl(path: string | null) {
   return path ? `https://image.tmdb.org/t/p/w500${path}` : ''
 }
+
+// 상세 모달 (PRD §6.5) — 카드 클릭 시 열림, 라우팅 없음
+const activeItem = ref<PoolItem | null>(null)
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 function prefersReducedMotion() {
@@ -204,7 +207,13 @@ onUnmounted(() => {
           <article
             v-for="item in result.currentThree"
             :key="item.id"
-            class="js-result-card result-card flex flex-col"
+            class="js-result-card result-card flex cursor-pointer flex-col"
+            role="button"
+            tabindex="0"
+            :aria-label="`${item.title} 상세 보기`"
+            @click="activeItem = item"
+            @keydown.enter.prevent="activeItem = item"
+            @keydown.space.prevent="activeItem = item"
           >
             <div class="result-card__poster">
               <img
@@ -253,6 +262,12 @@ onUnmounted(() => {
     <footer class="mx-auto mt-24 w-full max-w-site text-caption text-text-mute">
       데이터 제공: TMDB. 이 제품은 TMDB API를 사용하지만 TMDB의 보증 또는 인증을 받지 않았습니다.
     </footer>
+
+    <TitleModal
+      v-if="activeItem"
+      :item="activeItem"
+      @close="activeItem = null"
+    />
   </main>
 </template>
 
@@ -271,8 +286,12 @@ onUnmounted(() => {
   border: 1px solid var(--line);
   transition: border-color var(--dur-fast) var(--ease-out);
 }
-.js-result-card:hover .result-card__poster {
+.js-result-card:hover .result-card__poster,
+.js-result-card:focus-visible .result-card__poster {
   border-color: var(--accent);
+}
+.js-result-card:focus-visible {
+  outline: none;
 }
 .result-card__poster img {
   width: 100%;
