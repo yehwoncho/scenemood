@@ -418,8 +418,13 @@ onUnmounted(() => {
     <div
       class="hero-copy pointer-events-none absolute inset-0 z-40 flex items-center justify-center px-gutter"
     >
+      <!-- 카피 뒤 스크림 — 클러스터(z 10~30) 위, 텍스트 아래.
+           좁은/세로 화면에서 타원 클러스터가 중앙으로 몰려 카피를 가려도
+           최소한 읽히게 한다 (제약사항 "모바일은 레이아웃 깨짐 방지 수준"). -->
+      <div class="hero-scrim" aria-hidden="true" />
+
       <!-- copyEl: 실제 카피 블록. 배치 안전 영역을 이 요소의 bounding box 로 잰다. -->
-      <div ref="copyEl" class="flex flex-col items-center text-center">
+      <div ref="copyEl" class="relative flex flex-col items-center text-center">
         <h1 class="text-display text-text">BLINK</h1>
         <p class="mt-4 max-w-site text-body text-text-dim">
           "뭐 보지?"를 30초 만에 끝내는 무드 기반 콘텐츠 큐레이터
@@ -559,6 +564,36 @@ onUnmounted(() => {
   }
   .poster:hover .poster-card {
     transform: none;
+  }
+}
+
+/* ── 카피 뒤 스크림 ──────────────────────────────────────────────
+   .hero-copy(z-40) 의 첫 자식이므로 클러스터(z 10~30) 위, 텍스트(뒤 형제) 아래.
+   데스크톱은 중앙 안전 영역이 이미 확보돼 거의 안 보일 만큼 옅게, 900px 이하에서는
+   타원 클러스터가 중앙으로 몰리므로 진하게 깔아 카피 가독성을 지킨다. */
+.hero-scrim {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(820px, 94vw);
+  height: min(560px, 64vh);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(10, 10, 10, 0.45) 0%,
+    rgba(10, 10, 10, 0.28) 44%,
+    rgba(10, 10, 10, 0) 74%
+  );
+}
+@media (max-width: 900px) {
+  .hero-scrim {
+    background: radial-gradient(
+      ellipse at center,
+      rgba(10, 10, 10, 0.95) 0%,
+      rgba(10, 10, 10, 0.85) 40%,
+      rgba(10, 10, 10, 0) 76%
+    );
   }
 }
 </style>

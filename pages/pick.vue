@@ -387,6 +387,7 @@ onUnmounted(() => {
   line-height: 1.1;
   letter-spacing: -0.02em;
   color: var(--text);
+  word-break: keep-all; /* 좁은 화면에서 '설레고 싶어' 가 '싶/어' 로 쪼개지지 않게 */
 }
 .pick-card__title--sm {
   font-size: 20px;

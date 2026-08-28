@@ -254,6 +254,7 @@ onUnmounted(() => {
 
 .title-modal__poster {
   flex-shrink: 0;
+  overflow: hidden;
   background: var(--surface-hi);
 }
 .title-modal__poster img {
@@ -261,6 +262,15 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+/* 모바일(포스터가 위) — 포스터가 첫 화면을 다 먹지 않게 높이 고정 */
+@media (max-width: 767px) {
+  .title-modal__poster {
+    height: 40vh;
+  }
+  .title-modal__poster img {
+    object-position: center 20%;
+  }
 }
 @media (min-width: 768px) {
   .title-modal__poster {
