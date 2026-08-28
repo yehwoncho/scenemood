@@ -13,8 +13,11 @@ export default defineNuxtConfig({
   },
 
   runtimeConfig: {
-    // 서버 전용 값. .env의 TMDB_API_KEY가 매핑되며, `public`이 아니므로
-    // 클라이언트 번들에는 절대 포함되지 않는다. (server/api/discover.ts에서만 사용)
-    tmdbApiKey: process.env.TMDB_API_KEY,
+    // 서버 전용 값. `public`이 아니므로 클라이언트 번들에는 포함되지 않는다.
+    //  - 로컬: .env 의 TMDB_API_KEY 를 빌드/실행 시점에 읽는다.
+    //  - Vercel 등 배포: 런타임에 환경변수 `NUXT_TMDB_API_KEY` 가 이 값을 덮어쓴다
+    //    (Nuxt 규칙: runtimeConfig.<key> ← NUXT_<KEY>). 빌드 없이도 반영되므로
+    //    배포 환경변수는 이 이름으로 등록할 것. 아래 기본값은 빌드 시점 폴백.
+    tmdbApiKey: process.env.TMDB_API_KEY || process.env.NUXT_TMDB_API_KEY || '',
   },
 })

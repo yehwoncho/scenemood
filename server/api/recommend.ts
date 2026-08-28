@@ -100,7 +100,7 @@ export interface RecommendResponse {
 }
 
 export default defineEventHandler(async (event: H3Event): Promise<RecommendResponse> => {
-  const config = useRuntimeConfig()
+  const config = useRuntimeConfig(event)
   if (!config.tmdbApiKey) {
     throw createError({
       statusCode: 500,

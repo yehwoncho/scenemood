@@ -32,7 +32,7 @@ const PASSTHROUGH_KEYS = [
  * - include_adult는 항상 false로 고정한다 (클라이언트가 override 불가, PRD §8 "성인 콘텐츠 제외").
  */
 export default defineEventHandler(async (event: H3Event) => {
-  const config = useRuntimeConfig()
+  const config = useRuntimeConfig(event)
 
   if (!config.tmdbApiKey) {
     throw createError({

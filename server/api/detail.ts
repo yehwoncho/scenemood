@@ -72,7 +72,7 @@ const mapProviders = (list: TmdbProvider[] | undefined): DetailProvider[] =>
     }))
 
 export default defineEventHandler(async (event: H3Event): Promise<DetailResponse> => {
-  const config = useRuntimeConfig()
+  const config = useRuntimeConfig(event)
   if (!config.tmdbApiKey) {
     throw createError({
       statusCode: 500,

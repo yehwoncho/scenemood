@@ -22,7 +22,7 @@ interface HeroPosterResult {
  * - 목록이 완전 고정이므로 1시간 캐시 (쿼리 없음 → 단일 캐시 엔트리).
  */
 export default defineCachedEventHandler(async (event: H3Event): Promise<HeroPosterResult[]> => {
-  const config = useRuntimeConfig()
+  const config = useRuntimeConfig(event)
 
   if (!config.tmdbApiKey) {
     throw createError({
