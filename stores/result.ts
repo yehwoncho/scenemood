@@ -25,6 +25,8 @@ export interface PoolItem {
 interface RecommendResponse {
   page: number
   hasMore: boolean
+  moodsUsed: string[]
+  relaxed: boolean
   results: PoolItem[]
 }
 
@@ -47,6 +49,9 @@ export const useResultStore = defineStore('result', () => {
   const hasMore = ref(false) // 서버에 더 받을 페이지가 있는지
   const status = ref<Status>('idle')
   const errorMessage = ref('')
+  // 조건이 좁아 서버가 기분 태그를 완화했을 때 실제 반영된 기분. 결과 카드 칩에 쓴다.
+  const moodsUsed = ref<string[]>([])
+  const relaxed = ref(false)
 
   async function requestPool(page: number): Promise<RecommendResponse> {
     const pick = usePickStore()
@@ -68,7 +73,14 @@ export const useResultStore = defineStore('result', () => {
       pool.value = shuffle(res.results)
       poolPage.value = res.page
       hasMore.value = res.hasMore
+      moodsUsed.value = res.moodsUsed
+      relaxed.value = res.relaxed
       cursor.value = 0
+      if (pool.value.length === 0) {
+        status.value = 'error'
+        errorMessage.value = '조건에 맞는 작품을 찾지 못했어요. 조건을 바꿔볼까요?'
+        return
+      }
       await drawThree()
       status.value = 'ready'
     }
@@ -110,6 +122,8 @@ export const useResultStore = defineStore('result', () => {
     cursor.value = 0
     poolPage.value = 1
     hasMore.value = false
+    moodsUsed.value = []
+    relaxed.value = false
     status.value = 'idle'
     errorMessage.value = ''
   }
@@ -120,6 +134,8 @@ export const useResultStore = defineStore('result', () => {
     status,
     errorMessage,
     hasMore,
+    moodsUsed,
+    relaxed,
     loadPool,
     drawThree,
     reset,

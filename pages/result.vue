@@ -41,8 +41,13 @@ const SITUATION_LABEL: Record<Situation, string> = {
 }
 
 // #잔잔하게 #90분 이하 #자기 전  (PRD §6.4)
+// 조건이 좁아 서버가 기분을 완화했으면 실제 반영된 것만 칩으로 노출한다
+// (선택한 태그를 무시하고 고른 카드에 그 태그를 붙이면 6.4의 "투명성"과 어긋난다).
 const chips = computed(() => {
-  const out = pick.moods.map((m) => MOOD_LABEL[m])
+  const effectiveMoods = result.relaxed
+    ? (result.moodsUsed as Mood[])
+    : pick.moods
+  const out = effectiveMoods.map((m) => MOOD_LABEL[m]).filter(Boolean)
   out.push(`${pick.runtime}분 이하`)
   if (pick.situation) out.push(SITUATION_LABEL[pick.situation])
   return out

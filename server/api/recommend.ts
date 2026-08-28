@@ -14,11 +14,15 @@ const TMDB_BASE_URL = 'https://api.themoviedb.org/3'
  *
  * - page 는 "풀 페이지" 다. 풀 1페이지 = TMDB 2페이지(40편) → 가중 정렬 후 상위 30.
  *   재추천으로 풀이 소진되면 클라이언트가 page+1 로 다시 부른다 (PRD §6.2 마지막 줄).
+ * - 조건이 좁아 풀이 MIN_VIABLE(10) 미만이면 기분 태그를 뒤에서부터 1개씩
+ *   떼어내며 재조회한다 (상황 하드 필터·러닝타임은 절대 완화하지 않는다).
+ *   실제로 사용한 기분은 moodsUsed 로 돌려줘 결과 카드 태그 칩에 반영한다.
  * - TMDB_API_KEY 는 서버 전용(runtimeConfig). 클라이언트엔 노출되지 않는다.
  */
 
 const POOL_SIZE = 30
 const TMDB_PAGES_PER_POOL = 2 // 풀 1페이지가 소비하는 TMDB 페이지 수 (20편 × 2 = 40편)
+const MIN_VIABLE = 10 // 이보다 적으면 기분 태그를 완화해 재조회
 
 // PRD §6.1 기분 태그 8종 → TMDB 장르 ID
 const MOOD_GENRES: Record<string, number[]> = {
@@ -86,6 +90,8 @@ export interface RecommendItem {
 export interface RecommendResponse {
   page: number
   hasMore: boolean
+  moodsUsed: string[] // 완화 후 실제로 반영된 기분 (요청보다 짧을 수 있음)
+  relaxed: boolean
   results: RecommendItem[]
 }
 
@@ -103,117 +109,137 @@ export default defineEventHandler(async (event: H3Event): Promise<RecommendRespo
   const runtime = clamp(Number(asString(q.runtime)) || RUNTIME_DEFAULT, RUNTIME_MIN, RUNTIME_MAX)
   const poolPage = Math.max(1, Math.floor(Number(asString(q.page)) || 1))
   const situation = asString(q.situation)
-  const moods = asString(q.moods)
+  const requestedMoods = asString(q.moods)
     .split(',')
     .map((s) => s.trim())
     .filter((m) => m in MOOD_GENRES)
     .slice(0, MAX_MOODS)
 
   const sf = SITUATION_FILTERS[situation]
-
-  // 2. 기분 → 장르 (최대 3개, OR 결합 = 콤마). PRD §6.1
-  const genreSet = new Set<number>()
-  for (const m of moods) {
-    for (const g of MOOD_GENRES[m]) genreSet.add(g)
-  }
-
-  // 1 + 3. 러닝타임 상한 — STEP 3 값 vs 상황 하드 필터 vs 잔잔함 규칙 중 가장 엄격한(작은) 값
-  let runtimeCap = runtime
-  if (sf?.runtimeCap) runtimeCap = Math.min(runtimeCap, sf.runtimeCap)
-  if (moods.includes('calm')) runtimeCap = Math.min(runtimeCap, CALM_MAX_RUNTIME)
-
-  // 평점 하한 — 상황(함께) vs 잔잔함 중 높은 값
-  let minRating = 0
-  if (sf?.minRating) minRating = Math.max(minRating, sf.minRating)
-  if (moods.includes('calm')) minRating = Math.max(minRating, CALM_MIN_RATING)
-
-  const withoutGenres = sf?.withoutGenres ?? []
-  const withKeywords = moods.includes('catharsis') ? String(REVENGE_KEYWORD_ID) : ''
-
-  const baseParams: Record<string, string> = {
-    api_key: apiKey,
-    language: 'ko-KR',
-    region: 'KR',
-    include_adult: 'false', // PRD §8 — 클라이언트가 무엇을 보내든 항상 고정
-    sort_by: 'popularity.desc',
-    'vote_count.gte': '100', // 표본 없는 고평점·단편 노이즈 제거
-    // TMDB /discover 의 with_runtime 은 runtime 미상(0) 항목을 걸러주지 못해
-    // 신뢰할 수 없다. 여기선 힌트로만 넣고, 실제 상한 적용은 상세에서 받은
-    // runtime 으로 아래에서 다시 필터한다.
-    'with_runtime.gte': '1',
-    'with_runtime.lte': String(runtimeCap),
-  }
-  if (genreSet.size) baseParams.with_genres = [...genreSet].join(',')
-  if (withoutGenres.length) baseParams.without_genres = withoutGenres.join(',')
-  if (minRating > 0) baseParams['vote_average.gte'] = String(minRating)
-  if (withKeywords) baseParams.with_keywords = withKeywords
-
-  // 4. /discover 호출 — 풀 페이지가 소비하는 TMDB 페이지 2개를 병렬로
   const startPage = (poolPage - 1) * TMDB_PAGES_PER_POOL + 1
-  const pageNums = Array.from({ length: TMDB_PAGES_PER_POOL }, (_, i) => startPage + i)
 
-  let responses: TmdbDiscoverResponse[]
-  try {
-    responses = await Promise.all(
+  // ── 한 번의 조회 패스 — 주어진 기분 목록으로 discover → 정렬 → 상세 runtime → 상한 필터
+  async function discoverPass(moods: string[]): Promise<{ items: RecommendItem[], hasMore: boolean }> {
+    const genreSet = new Set<number>()
+    for (const m of moods) {
+      for (const g of MOOD_GENRES[m]) genreSet.add(g)
+    }
+
+    // 러닝타임 상한 — STEP 3 값 vs 상황 하드 필터 vs 잔잔함 중 가장 엄격한 값 (기분만 완화됨)
+    let runtimeCap = runtime
+    if (sf?.runtimeCap) runtimeCap = Math.min(runtimeCap, sf.runtimeCap)
+    if (moods.includes('calm')) runtimeCap = Math.min(runtimeCap, CALM_MAX_RUNTIME)
+
+    // 평점 하한 — 상황(함께) vs 잔잔함 중 높은 값
+    let minRating = 0
+    if (sf?.minRating) minRating = Math.max(minRating, sf.minRating)
+    if (moods.includes('calm')) minRating = Math.max(minRating, CALM_MIN_RATING)
+
+    const params: Record<string, string> = {
+      api_key: apiKey,
+      language: 'ko-KR',
+      region: 'KR',
+      include_adult: 'false', // PRD §8 — 클라이언트가 무엇을 보내든 항상 고정
+      sort_by: 'popularity.desc',
+      'vote_count.gte': '50', // 표본 없는 고평점·단편 노이즈 제거
+      // TMDB /discover 의 with_runtime 은 runtime 미상(0) 항목을 못 걸러 신뢰할 수 없다.
+      // 힌트로만 넣고, 실제 상한은 상세에서 받은 runtime 으로 아래에서 다시 필터한다.
+      'with_runtime.gte': '1',
+      'with_runtime.lte': String(runtimeCap),
+    }
+    if (genreSet.size) params.with_genres = [...genreSet].join(',') // 콤마 = OR (PRD §6.2)
+    if (sf?.withoutGenres?.length) params.without_genres = sf.withoutGenres.join(',')
+    if (minRating > 0) params['vote_average.gte'] = String(minRating)
+    if (moods.includes('catharsis')) params.with_keywords = String(REVENGE_KEYWORD_ID)
+
+    const pageNums = Array.from({ length: TMDB_PAGES_PER_POOL }, (_, i) => startPage + i)
+    const responses = await Promise.all(
       pageNums.map((p) =>
         $fetch<TmdbDiscoverResponse>(`${TMDB_BASE_URL}/discover/movie`, {
-          params: { ...baseParams, page: String(p) },
+          params: { ...params, page: String(p) },
         }),
       ),
     )
-  }
-  catch (err: any) {
-    throw createError({
-      statusCode: err?.response?.status ?? 502,
-      statusMessage: 'TMDB 요청에 실패했습니다.',
+
+    const totalPages = responses[0]?.total_pages ?? 1
+    const hasMore = startPage + TMDB_PAGES_PER_POOL <= totalPages
+
+    const seen = new Set<number>()
+    const merged: TmdbMovie[] = []
+    for (const r of responses) {
+      for (const m of r.results ?? []) {
+        if (!m.poster_path || seen.has(m.id)) continue
+        seen.add(m.id)
+        merged.push(m)
+      }
+    }
+
+    // 정렬 — 평점 × 인기도 가중 (PRD §6.2)
+    const score = (m: TmdbMovie) =>
+      (m.vote_average ?? 0) * Math.log10(Math.max(m.popularity ?? 0, 1) + 10)
+    merged.sort((a, b) => score(b) - score(a))
+
+    // runtime 은 /discover 응답에 없어 상세에서 채운다 (후보 전체, 병렬).
+    // 실패해 runtime 을 모르는 항목은 상한 필터에서 살려 둔다.
+    const details = await Promise.allSettled(
+      merged.map((m) =>
+        $fetch<{ runtime?: number | null }>(`${TMDB_BASE_URL}/movie/${m.id}`, {
+          params: { api_key: apiKey, language: 'ko-KR' },
+        }),
+      ),
+    )
+    const withRuntime: RecommendItem[] = merged.map((m, i) => {
+      const d = details[i]
+      return {
+        id: m.id,
+        poster_path: m.poster_path ?? null,
+        title: m.title ?? '',
+        overview: m.overview ?? '',
+        // TMDB 가 runtime 을 0 으로 주는 경우(미상)는 null 로 취급한다
+        runtime: d.status === 'fulfilled' ? (d.value.runtime || null) : null,
+        vote_average: m.vote_average ?? 0,
+      }
     })
+
+    const items = withRuntime.filter((r) => r.runtime == null || r.runtime <= runtimeCap)
+    return { items, hasMore }
   }
 
-  const totalPages = responses[0]?.total_pages ?? 1
-  const hasMore = startPage + TMDB_PAGES_PER_POOL <= totalPages
-
-  // id 중복 제거 + poster_path 있는 것만
-  const seen = new Set<number>()
-  const merged: TmdbMovie[] = []
-  for (const r of responses) {
-    for (const m of r.results ?? []) {
-      if (!m.poster_path || seen.has(m.id)) continue
-      seen.add(m.id)
-      merged.push(m)
-    }
+  // ── 완화 루프 — 요청한 기분 → 뒤에서 1개씩 제거 → 0개. MIN_VIABLE 도달 시 즉시 채택.
+  const attempts: string[][] = []
+  for (let n = requestedMoods.length; n >= 0; n--) {
+    attempts.push(requestedMoods.slice(0, n))
   }
 
-  // 5. 정렬 — 평점 × 인기도 가중 (PRD §6.2)
-  const score = (m: TmdbMovie) =>
-    (m.vote_average ?? 0) * Math.log10(Math.max(m.popularity ?? 0, 1) + 10)
-  merged.sort((a, b) => score(b) - score(a))
-
-  // runtime 은 /discover 응답에 없어 상세에서 채운다 (후보 전체, 병렬).
-  // 받은 runtime 으로 상한을 실제 적용하고 — 실패해 runtime 을 모르는 항목은
-  // 살려 둔다 (화면엔 "러닝타임 이하" 칩만 붙으므로 오차 허용).
-  const details = await Promise.allSettled(
-    merged.map((m) =>
-      $fetch<{ runtime?: number | null }>(`${TMDB_BASE_URL}/movie/${m.id}`, {
-        params: { api_key: apiKey, language: 'ko-KR' },
-      }),
-    ),
-  )
-
-  const withRuntime: RecommendItem[] = merged.map((m, i) => {
-    const d = details[i]
-    return {
-      id: m.id,
-      poster_path: m.poster_path ?? null,
-      title: m.title ?? '',
-      overview: m.overview ?? '',
-      runtime: d.status === 'fulfilled' ? (d.value.runtime ?? null) : null,
-      vote_average: m.vote_average ?? 0,
+  let best: { items: RecommendItem[], hasMore: boolean, moods: string[] } | null = null
+  for (const moods of attempts) {
+    let pass: { items: RecommendItem[], hasMore: boolean }
+    try {
+      pass = await discoverPass(moods)
     }
-  })
+    catch (err: any) {
+      // 첫 시도가 네트워크로 죽으면 에러, 이후 완화 시도 실패는 무시하고 best 유지
+      if (!best) {
+        throw createError({
+          statusCode: err?.response?.status ?? 502,
+          statusMessage: 'TMDB 요청에 실패했습니다.',
+        })
+      }
+      continue
+    }
+    if (!best || pass.items.length > best.items.length) {
+      best = { ...pass, moods }
+    }
+    if (pass.items.length >= MIN_VIABLE) break
+  }
 
-  const passed = withRuntime.filter((r) => r.runtime == null || r.runtime <= runtimeCap)
-  // 상한이 너무 빡빡해 3편도 못 남으면 상한 필터를 포기하고 가중 상위로 채운다.
-  const results = (passed.length >= 3 ? passed : withRuntime).slice(0, POOL_SIZE)
+  const chosen = best ?? { items: [] as RecommendItem[], hasMore: false, moods: [] as string[] }
 
-  return { page: poolPage, hasMore, results }
+  return {
+    page: poolPage,
+    hasMore: chosen.hasMore,
+    moodsUsed: chosen.moods,
+    relaxed: chosen.moods.length < requestedMoods.length,
+    results: chosen.items.slice(0, POOL_SIZE),
+  }
 })
