@@ -2,7 +2,13 @@ import type { H3Event } from 'h3'
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3'
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
-const GEMINI_MODEL = 'gemini-3.6-flash'
+// ListModels 로 확인한 안정 버전. gemini-3.6-flash 는 목록엔 있으나 thinking 이 무거워
+// 이 프롬프트에서 응답에 40~50s 가 걸려 아래 timeout 에 매번 걸렸다(= 리뷰 분석 실패의
+// 실제 원인). flash-lite 는 같은 프롬프트를 보통 2~15s, 최악에도 ~30s 에 끝낸다.
+const GEMINI_MODEL = 'gemini-3.5-flash-lite'
+// Gemini API 지연 편차가 커서(무료 티어·혼잡 시 20~30s 스파이크) 넉넉하게 잡는다.
+// 성공분은 6h 캐시되므로 느린 첫 호출 1회만 감수하면 된다.
+const GEMINI_TIMEOUT_MS = 45_000
 
 const ALLOWED_MEDIA_TYPES = ['movie', 'tv'] as const
 type MediaType = (typeof ALLOWED_MEDIA_TYPES)[number]
@@ -204,14 +210,15 @@ export default defineEventHandler(async (event: H3Event): Promise<ReviewInsightR
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.7,
-            // 2문장이면 충분하지만 thinking 이 예산을 먼저 소비하므로 넉넉히.
-            maxOutputTokens: 2048,
+            // 2문장 추천사 + thinking(low) 예산까지 감안한 값. flash-lite 는 thinking 이
+            // 가벼워 1024 로도 잘린 적 없다(잘리면 raw 가 비어 502 로 떨어진다).
+            maxOutputTokens: 1024,
             // 짧은 추천사엔 깊은 추론이 필요 없다 — 지연을 줄이려 thinking 최소화.
             thinkingConfig: { thinkingLevel: 'low' },
             responseMimeType: 'text/plain',
           },
         },
-        timeout: 20_000,
+        timeout: GEMINI_TIMEOUT_MS,
         retry: 0,
       },
     )
@@ -219,6 +226,12 @@ export default defineEventHandler(async (event: H3Event): Promise<ReviewInsightR
   catch (err: any) {
     // 키가 쿼리스트링에 들어가므로 err.message(전체 URL 포함)는 로깅하지 않는다.
     console.error('[review-insight] Gemini 호출 실패', err?.response?.status ?? err?.name ?? 'unknown')
+    // 개발 환경에서만 Gemini 가 반환한 실제 status/에러 바디를 찍는다 (키는 마스킹).
+    if (import.meta.dev) {
+      console.error('[review-insight][dev] status =', err?.response?.status ?? err?.statusCode)
+      console.error('[review-insight][dev] data   =', JSON.stringify(err?.data ?? err?.response?._data ?? null))
+      console.error('[review-insight][dev] message=', String(err?.message ?? '').replaceAll(config.geminiApiKey, '***'))
+    }
     throw createError({
       statusCode: err?.response?.status ?? 502,
       statusMessage: 'AI 코멘트 생성에 실패했습니다.',
@@ -235,6 +248,10 @@ export default defineEventHandler(async (event: H3Event): Promise<ReviewInsightR
     .trim()
 
   if (!raw) {
+    if (import.meta.dev) {
+      console.error('[review-insight][dev] 빈 응답. finishReason =', gemini.candidates?.[0]?.finishReason,
+        '| usage =', JSON.stringify((gemini as any).usageMetadata ?? null))
+    }
     throw createError({ statusCode: 502, statusMessage: 'AI 코멘트가 비어 있습니다.' })
   }
 
