@@ -7,10 +7,9 @@ import type { ReviewInsightResponse } from '~/server/api/review-insight'
  * - 진행 중 요청도 같은 Promise 를 공유해 중복 호출을 막는다.
  * - Promise 는 절대 reject 하지 않는다: 성공이면 문장, 실패/빈 응답이면 null.
  * - 실패분은 캐시에 남기지 않는다(settle 후 삭제) → 쿼터가 회복되면 재오픈 시
- *   다시 시도한다. 깜빡임은 캐시가 아니라 아래 로딩-지연 게이트로 막는다.
- * - settledInsightIds: 응답이 이미 도착한(=성공) id. 로딩 UI 게이트가 쓴다.
- *   진행 중 요청을 공유하며 모달을 닫았다 다시 열어도 이 값이 false 면
- *   로딩 펄스를 다시 보여준다 (Promise 존재 ≠ 결과 준비 완료).
+ *   다시 시도한다.
+ * - settledInsightIds: 응답이 이미 도착한(=성공) id. 재오픈 시 로딩 펄스를
+ *   건너뛰고 바로 문장을 보여주는 용도 (없어도 동작에는 지장 없음).
  */
 interface InsightOutcome { comment: string | null }
 const insightCache = new Map<number, Promise<InsightOutcome>>()
@@ -31,7 +30,8 @@ function fetchInsight(id: number, situation: string, moods: string): Promise<Ins
       settledInsightIds.add(id)
       return { comment: res.comment || null }
     })
-    .catch((): InsightOutcome => {
+    .catch((err): InsightOutcome => {
+      console.error('[TitleModal] review-insight 요청 실패', err?.data ?? err?.message ?? err)
       insightCache.delete(id) // 실패는 기억하지 않는다 — 다음 오픈에서 재시도
       return { comment: null }
     })
@@ -71,14 +71,14 @@ const detailError = ref(false)
 /**
  * AI 코멘트 상태 (캐시는 위 비-setup <script> 블록의 모듈 스코프 insightCache).
  *
- * - aiLoading 은 "요청이 2.5s 넘게 걸릴 때"만 켜진다. 429·타임아웃 같은 빠른
- *   실패(대개 <1.5s)나 이미 받아둔 결과(hasInsightResult)는 그 전에 끝나므로
- *   로딩 UI 가 아예 뜨지 않는다 → "잠깐 떴다 사라지는" 깜빡임 제거.
+ * - 요청은 무조건 보낸다. 로딩 표시는 지연 게이트 없이 바로 켠다 —
+ *   "아예 안 뜸"보다 "잠깐 떴다 사라짐"이 낫다는 판단(급한 수정).
+ *   이미 받아둔 결과가 있으면(재오픈) 로딩을 건너뛴다.
  * - Gemini(flash-lite)는 지연 편차가 커서 정상 성공도 2~30s 가 걸린다
  *   (server/api/review-insight.ts, timeout 45s). 그래서 8s 이 지나도 응답이
  *   없으면 문구를 "조금만 기다려주세요…"로 바꿔 "멈춘 게 아니다"를 알린다.
- * - loadInsight 는 props.item.id 를 watch 로 추적한다. 응답이 도착했을 때
- *   모달이 다른 작품으로 바뀌었으면(레이스) 그 응답은 버린다.
+ * - loadInsight 는 실패해도(throw 포함) 절대 멈추지 않도록 try/catch 로 감싼다.
+ *   응답 도착 시 모달이 다른 작품으로 바뀌었으면(레이스) 그 응답은 버린다.
  */
 const AI_LABEL = '리뷰 분석 중…'
 const AI_LABEL_LONG = '조금만 기다려주세요…'
@@ -86,16 +86,10 @@ const AI_LABEL_LONG = '조금만 기다려주세요…'
 const aiComment = ref<string | null>(null)
 const aiLoading = ref(false)
 const aiLabel = ref(AI_LABEL)
-const LOADING_DELAY_MS = 2500
 const LONG_WAIT_MS = 8000
-let loadingTimer: ReturnType<typeof setTimeout> | null = null
 let longWaitTimer: ReturnType<typeof setTimeout> | null = null
 
 function clearLoadingTimers() {
-  if (loadingTimer) {
-    clearTimeout(loadingTimer)
-    loadingTimer = null
-  }
   if (longWaitTimer) {
     clearTimeout(longWaitTimer)
     longWaitTimer = null
@@ -104,23 +98,27 @@ function clearLoadingTimers() {
 
 async function loadInsight(targetId: number) {
   clearLoadingTimers()
-  aiLoading.value = false
   aiComment.value = null
   aiLabel.value = AI_LABEL
 
-  // 이미 받아둔 결과가 있으면(=즉시 resolve) 로딩 UI 를 걸지 않는다.
-  if (!hasInsightResult(targetId)) {
-    loadingTimer = setTimeout(() => {
-      if (props.item.id === targetId && aiComment.value === null) aiLoading.value = true
-    }, LOADING_DELAY_MS)
+  const known = hasInsightResult(targetId)
+  aiLoading.value = !known // 재오픈(캐시 있음)이면 로딩 생략, 아니면 바로 표시
+  if (!known) {
     // 8s 이 지나도 응답이 없으면 장문 대기 문구로 전환 (지연이 큰 게 정상 범위).
     longWaitTimer = setTimeout(() => {
       if (props.item.id === targetId && aiComment.value === null) aiLabel.value = AI_LABEL_LONG
     }, LONG_WAIT_MS)
   }
 
-  const pick = usePickStore()
-  const { comment } = await fetchInsight(targetId, pick.situation ?? '', pick.moods.join(','))
+  let comment: string | null = null
+  try {
+    const pick = usePickStore()
+    const moods = Array.isArray(pick.moods) ? pick.moods.join(',') : ''
+    comment = (await fetchInsight(targetId, pick.situation ?? '', moods)).comment
+  }
+  catch (err) {
+    console.error('[TitleModal] loadInsight 실패', err)
+  }
 
   clearLoadingTimers()
   // 레이스 가드 — 그 사이 모달이 다른 작품으로 바뀌었으면 이 응답은 폐기.
