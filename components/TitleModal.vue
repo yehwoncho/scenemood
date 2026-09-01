@@ -269,6 +269,15 @@ onUnmounted(() => {
             <span class="title-modal__rating-label">TMDB 평점</span>
           </div>
 
+          <!-- 보관함 — 찜하기 · 내 별점 (지연 인증: 비로그인이면 클릭 시 로그인 모달) -->
+          <div class="title-modal__my">
+            <BookmarkButton :item="item" variant="label" />
+            <div class="title-modal__my-rating">
+              <span class="title-modal__rating-label">내 별점</span>
+              <StarRating :item="item" size="md" />
+            </div>
+          </div>
+
           <div class="title-modal__providers">
             <span class="title-modal__eyebrow">시청 가능 플랫폼</span>
             <template v-if="groupsWithItems().length">
@@ -492,6 +501,19 @@ onUnmounted(() => {
   font-size: 12px;
   letter-spacing: 0.05em;
   color: var(--text-mute);
+}
+
+.title-modal__my {
+  margin-top: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.1rem;
+}
+.title-modal__my-rating {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 
 .title-modal__providers {

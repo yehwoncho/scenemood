@@ -279,6 +279,7 @@ onUnmounted(() => {
                 loading="lazy"
               >
               <span v-else class="result-card__poster-fallback">{{ item.title }}</span>
+              <BookmarkButton :item="item" variant="icon" />
             </div>
 
             <span class="mt-5 text-[12px] uppercase tracking-[0.1em] text-accent">
@@ -287,6 +288,8 @@ onUnmounted(() => {
             <h2 class="mt-2 text-[22px] font-bold leading-tight tracking-[-0.02em] text-text">
               {{ item.title }}
             </h2>
+
+            <StarRating :item="item" size="sm" class="mt-2" />
 
             <ul class="mt-3 flex flex-wrap gap-x-3 gap-y-1.5">
               <li v-for="chip in chips" :key="chip" class="text-[13px] text-text-dim">

@@ -2,7 +2,7 @@ export default defineNuxtConfig({
   compatibilityDate: '2026-08-26',
   devtools: { enabled: true },
 
-  modules: ['@nuxtjs/tailwindcss', '@pinia/nuxt'],
+  modules: ['@nuxtjs/tailwindcss', '@pinia/nuxt', '@nuxtjs/supabase'],
 
   tailwindcss: {
     configPath: 'tailwind.config.ts',
@@ -10,6 +10,17 @@ export default defineNuxtConfig({
     // 여기서 등록하면 모듈이 자동으로 css 배열에 넣어주므로 별도 css: [...]는 두지 않는다
     // (둘 다 설정하면 @tailwind 디렉티브가 중복 주입된다).
     cssPath: '~/assets/css/main.css',
+  },
+
+  // 보관함(찜하기/별점) 로그인 — 이메일 매직링크. anon key 는 RLS 로 보호되는
+  // 게 전제라 공개 노출이 정상이다(TMDB/Gemini 키와 달리 runtimeConfig.public).
+  supabase: {
+    url: process.env.SUPABASE_URL,
+    key: process.env.SUPABASE_ANON_KEY,
+    // "지연 인증" — 로그인 안 해도 전 페이지 자유 열람, 찜하기/별점 누를 때만
+    // 유도한다. 모듈 기본값(redirect:true)은 미로그인 시 /login 으로 강제
+    // 이동시키는 전역 라우트 가드라 이 앱 흐름과 맞지 않아 끈다.
+    redirect: false,
   },
 
   runtimeConfig: {
