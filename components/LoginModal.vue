@@ -5,7 +5,10 @@
  * 호출부(BookmarkButton·StarRating 등)는 로그인 필요 시 authStore.openLogin() 만 부르면 된다.
  *
  * - signInWithOtp 는 비밀번호 없이 이메일로 받은 링크를 클릭하면 로그인되는 방식.
- *   emailRedirectTo 를 /library 로 지정해, 링크를 누르면 보관함으로 바로 온다.
+ *   여기서 쓰는 useSupabaseClient() 가 @supabase/ssr 의 createBrowserClient 라,
+ *   PKCE code-verifier 를 쿠키에 저장한다.
+ *   emailRedirectTo 는 서버 라우트 /auth/confirm — 거기서 요청 쿠키의 verifier 로
+ *   exchangeCodeForSession 을 하고 세션 쿠키를 심은 뒤 /library 로 보낸다.
  * - TitleModal 과 같은 오버레이 문법(backdrop·panel·ESC·바깥클릭)을 따른다.
  */
 import { nextTick, ref, watch } from 'vue'
@@ -49,7 +52,7 @@ async function sendLink() {
   try {
     const { error } = await supabase.auth.signInWithOtp({
       email: value,
-      options: { emailRedirectTo: `${window.location.origin}/library` },
+      options: { emailRedirectTo: `${window.location.origin}/auth/confirm` },
     })
     if (error) throw error
     phase.value = 'sent'

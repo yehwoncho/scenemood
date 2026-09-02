@@ -10,7 +10,7 @@
  *   상세 정보가 없지만, TitleModal 이 마운트되면서 /api/detail 로 채우므로
  *   0/빈 문자열 폴백은 아주 잠깐만 보인다.
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useAuthStore } from '~/stores/auth'
 import { useLibraryStore } from '~/stores/library'
 import type { PoolItem } from '~/stores/result'
@@ -23,6 +23,12 @@ useSeoMeta({
 const user = useSupabaseUser()
 const library = useLibraryStore()
 const auth = useAuthStore()
+const route = useRoute()
+
+// /auth/confirm 서버 콜백이 code 교환에 실패하면 ?auth_error=<사유> 를 달고 돌려보낸다.
+const authError = computed(() =>
+  typeof route.query.auth_error === 'string' ? route.query.auth_error : '',
+)
 
 onMounted(() => {
   if (user.value && !library.loaded && !library.loading) library.loadAll()
@@ -59,6 +65,7 @@ function removeBookmark(row: { tmdb_id: number, title: string, poster_path: stri
 
       <!-- 비로그인 -->
       <div v-if="!user" class="library-empty">
+        <p v-if="authError" class="library-error">{{ authError }}</p>
         <p class="text-body text-text-dim">로그인하면 찜한 작품과 별점을 모아볼 수 있어요.</p>
         <button type="button" class="library-cta" @click="auth.openLogin">
           이메일로 로그인
@@ -125,6 +132,12 @@ function removeBookmark(row: { tmdb_id: number, title: string, poster_path: stri
   align-items: flex-start;
   gap: 1.25rem;
   padding: 4rem 0;
+}
+.library-error {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #ff6b6b;
+  word-break: keep-all;
 }
 .library-cta {
   display: inline-flex;

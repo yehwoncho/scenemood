@@ -21,6 +21,25 @@ export default defineNuxtConfig({
     // 유도한다. 모듈 기본값(redirect:true)은 미로그인 시 /login 으로 강제
     // 이동시키는 전역 라우트 가드라 이 앱 흐름과 맞지 않아 끈다.
     redirect: false,
+
+    // @nuxtjs/supabase 는 내부적으로 @supabase/ssr 를 쓴다(브라우저=createBrowserClient,
+    // 서버=serverSupabaseClient=createServerClient). 세션·PKCE verifier 는 전부 쿠키에
+    // 저장되므로 server/routes/auth/confirm.get.ts 가 서버에서 code 를 교환할 수 있다.
+    cookieOptions: {
+      // 핵심: http://localhost 개발 환경(특히 Safari)은 Secure 쿠키를 저장하지 않아
+      // PKCE code-verifier 가 유실된다 → "PKCE code verifier not found in storage".
+      // 배포는 HTTPS 라 Secure 유지, 개발에서만 끈다.
+      secure: process.env.NODE_ENV === 'production',
+    },
+
+    clientOptions: {
+      auth: {
+        // 매직링크 code→세션 교환은 서버 라우트 /auth/confirm 에서 한다.
+        // 브라우저 자동 교환(detectSessionInUrl)은 SSR 하이드레이션과 경쟁하고
+        // 실패해도 조용해서(“로그인 안 됨” 화면만 남음) 끈다.
+        detectSessionInUrl: false,
+      },
+    },
   },
 
   runtimeConfig: {
